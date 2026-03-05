@@ -46,7 +46,10 @@ Works best with [magi](https://github.com/cbzehner/claude-skill-magi) installed 
 ### From Marketplace
 
 ```bash
+# Add the marketplace
 /plugin marketplace add cbzehner/claude-skill-ralph
+
+# Install the skill
 /plugin install ralph@cbzehner
 ```
 

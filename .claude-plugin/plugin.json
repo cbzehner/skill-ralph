@@ -1,0 +1,11 @@
+{
+  "name": "ralph",
+  "description": "Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification.",
+  "version": "1.0.0",
+  "author": {
+    "name": "cbzehner",
+    "email": "chris@cbzehner.com"
+  },
+  "repository": "https://github.com/cbzehner/claude-skill-ralph",
+  "license": "MIT"
+}

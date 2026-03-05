@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ralph",
+  "owner": {
+    "name": "cbzehner",
+    "email": "chris@cbzehner.com"
+  },
+  "plugins": [
+    {
+      "name": "ralph",
+      "source": "./",
+      "description": "Iterative implementation loop with review checkpoints for multi-step tasks",
+      "version": "1.0.0",
+      "author": {
+        "name": "cbzehner",
+        "email": "chris@cbzehner.com"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/cbzehner/claude-skill-ralph"
+    }
+  ]
+}
