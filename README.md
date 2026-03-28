@@ -47,7 +47,7 @@ Works best with [magi](https://github.com/cbzehner/claude-skill-magi) installed 
 
 ```bash
 # Add the marketplace
-/plugin marketplace add cbzehner/claude-skill-ralph
+/plugin marketplace add cbzehner/skill-ralph
 
 # Install the skill
 /plugin install ralph@cbzehner
@@ -57,7 +57,7 @@ Works best with [magi](https://github.com/cbzehner/claude-skill-magi) installed 
 
 ```bash
 cd ~/.claude/skills/
-git clone https://github.com/cbzehner/claude-skill-ralph.git ralph
+git clone https://github.com/cbzehner/skill-ralph.git ralph
 ```
 
 ## Usage
