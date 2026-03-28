@@ -1,7 +1,9 @@
 ---
 name: ralph
-description: Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification. Adapts to project-specific conventions via .ralph.md guidance file.
-allowed-tools: [Task, Read, Write, Edit, Glob, Grep, Skill, AskUserQuestion, Bash]
+description: Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification. Use this whenever the user has a plan file, multi-section task, or work that should be executed systematically with reviews between chunks.
+argument-hint: "[state-file]"
+effort: high
+allowed-tools: Task, Read, Write, Edit, Glob, Grep, Skill, AskUserQuestion, Bash
 ---
 
 # Ralph: Iterative Implementation Loop
@@ -140,7 +142,7 @@ Task(
   subagent_type: "general-purpose",
   description: "Implement: [work unit summary]",
   max_turns: 20,
-  prompt: [see inner-prompt.md, include project guidance if present]
+  prompt: [see ${CLAUDE_SKILL_DIR}/inner-prompt.md, include project guidance if present]
 )
 ```
 
@@ -241,24 +243,10 @@ The loop completes when:
 
 | Scenario | Action |
 |----------|--------|
-| Magi unavailable | Self-review using fallback criteria |
-| Inner loop blocked | Surface via AskUserQuestion |
-| State file parse error | Show error, ask user to fix |
-| No .ralph.md | Offer to create or use defaults |
-| 3+ no-progress iterations | Circuit breaker: stop loop, escalate to user |
-| Duration >60 min | Force checkpoint, prompt to split plan |
-| Inner loop max turns | Force exit, return partial summary |
-
-**Circuit breaker logic:**
-```
-if inner_loop.status == "partial" and no files_changed:
-  state.no_progress_count += 1
-else:
-  state.no_progress_count = 0
-
-if state.no_progress_count >= 3:
-  AskUserQuestion("Loop stuck after 3 iterations with no progress. Options?")
-```
+| Magi unavailable | Self-review using fallback criteria (see step 4) |
+| Inner loop blocked | Surface via AskUserQuestion with context |
+| State file parse error | Show error, ask user to fix format |
+| No .ralph.md | Offer to create or use defaults (see Project Guidance) |
 
 ## Manual Control
 
@@ -266,7 +254,7 @@ Interrupt anytime. State file preserves progress. Resume with `/ralph [state-fil
 
 ## Reference
 
-- `inner-prompt.md` - Inner loop subagent template
-- `examples/` - Example .ralph.md files for different project types
-- `examples/README.md` - Guide for crafting .ralph.md files
-- `docs/ARCHITECTURE.md` - Full architecture documentation
+- [inner-prompt.md](${CLAUDE_SKILL_DIR}/inner-prompt.md) - Inner loop subagent template
+- [examples/](${CLAUDE_SKILL_DIR}/examples/) - Example .ralph.md files for different project types
+- [examples/README.md](${CLAUDE_SKILL_DIR}/examples/README.md) - Guide for crafting .ralph.md files
+- [docs/ARCHITECTURE.md](${CLAUDE_SKILL_DIR}/docs/ARCHITECTURE.md) - Full architecture documentation
