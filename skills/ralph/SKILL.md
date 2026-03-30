@@ -35,6 +35,25 @@ Examples:
 - **Unclear requirements**: Clarify first, then plan, then ralph
 - **Tasks estimated >60 minutes**: Split into separate plans; long sessions hit context exhaustion
 
+## Host Adaptation
+
+Ralph's inner loop uses Claude Code primitives (Task subagents, Skill tool,
+AskUserQuestion). On hosts without these:
+
+- **No Task tool**: Run work units sequentially in the current session instead
+  of spawning subagents. Skip `max_turns` enforcement — use the guardrail
+  timers instead.
+- **No Skill tool**: Use self-review (Step 4 fallback) instead of `/magi`.
+  The self-review criteria already exist in the skill.
+- **No AskUserQuestion**: Make conservative assumptions and document them.
+  When a decision truly requires human input, state what you'd recommend and
+  why, then pause and wait for the user to respond.
+- **`${CLAUDE_SKILL_DIR}` unavailable**: Resolve file references relative to
+  the skill's actual directory path.
+
+The outer loop (LOAD → ASSESS → WORK → REVIEW → UPDATE → ROUTE) is the same
+regardless of host. Only the execution primitives change.
+
 ## Guardrails
 
 Ralph enforces limits to prevent context exhaustion:

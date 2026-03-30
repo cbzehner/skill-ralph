@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ralph"
+  short_description: "Execute larger tasks in reviewed implementation loops"
+  default_prompt: "Use $ralph to execute this multi-step plan in verified chunks with review checkpoints."
