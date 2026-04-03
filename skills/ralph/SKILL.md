@@ -112,9 +112,7 @@ See `examples/` in this skill's directory for templates and the README for guida
 ```yaml
 ---
 status: pending  # pending | in_progress | complete | archived
-gaps: []
-edge_cases: []
-progress: []
+progress: []     # each entry: { section, status, notes: [] }
 last_review: null
 iterations: 0
 no_progress_count: 0
@@ -125,6 +123,19 @@ started_at: null  # Set to current timestamp on first ASSESS
 
 ## Section 1
 ...
+```
+
+Progress entries track gaps and edge cases per work unit:
+```yaml
+progress:
+  - section: "Section 1"
+    status: complete
+    notes:
+      - "gap: API error handling not defined"
+      - "edge_case: empty input returns null"
+  - section: "Section 2"
+    status: in_progress
+    notes: []
 ```
 
 If file lacks frontmatter, add defaults.
@@ -166,12 +177,10 @@ Task(
 ```
 
 Inner loop works until:
-- Work unit complete (emit `<promise>UNIT_COMPLETE</promise>`)
+- Work unit complete (sets `status: completed` in return summary)
 - Blocked (needs decision, unclear requirement)
 - Max turns reached (hard limit: 20)
-- Context feels heavy
-
-**Completion signals:** The `<promise>UNIT_COMPLETE</promise>` tag signals intent; the YAML `status: completed` field in the return summary is canonical. Outer loop checks for both: promise presence confirms the inner loop believes work is done, status field is used for routing logic.
+- Context pressure (losing track of earlier work)
 
 **Subagent limitation:** Inner loops cannot spawn their own subagents. If work requires parallel execution, return to outer loop and let it coordinate.
 
@@ -179,7 +188,23 @@ Returns structured summary (see inner-prompt.md for format).
 
 ### 4. REVIEW
 
-Review method per `.ralph.md` guidance. Default: magi synthesis.
+Review has two paths: a fast path when tests gate quality, and the full magi path otherwise.
+
+#### Test-gated fast path
+
+Use this when ALL of these are true:
+1. The work unit or `.ralph.md` defines test commands or test criteria
+2. Inner loop returned `status: completed` AND `tests_status: passed`
+3. **Outer loop re-runs the tests itself and they pass** (trust but verify)
+
+When the fast path applies:
+- verdict: `pass`
+- recommendation: `continue` (or `archive` if all units complete)
+- Note any `gaps_discovered` or `edge_cases_discovered` from the inner loop summary
+
+#### Full review (magi or self-review)
+
+Use when the fast path does NOT apply: tests not defined, tests failed, inner loop returned `partial` or `blocked`, or `tests_status: not_run`.
 
 ```
 /magi "Review this implementation work:
@@ -199,7 +224,6 @@ Review method per `.ralph.md` guidance. Default: magi synthesis.
 Return structured assessment:
 - verdict: pass | fail | needs_work
 - gaps_discovered: [list]
-- edge_cases_discovered: [list]
 - remaining_work: [description]
 - recommendation: continue | needs_human_input | archive
 - rationale: [brief explanation]"
@@ -215,7 +239,7 @@ Return structured assessment:
 ### 5. UPDATE STATE
 
 Update the state file per guidance:
-- **Default**: Update frontmatter arrays (gaps, edge_cases, progress)
+- **Default**: Update `progress` array — set section status, append gaps/edge cases to `notes`
 - **Per guidance**: Check off criteria, append to sections, etc.
 
 **Update guardrail tracking:**
@@ -227,12 +251,19 @@ Update the state file per guidance:
 
 Set review timestamp (`last_review`).
 
+**Auto-commit at iteration boundary:**
+After updating the state file, commit all changes from this iteration:
+```bash
+git add -A && git commit -m "ralph: iteration [N] - [work unit name]"
+```
+This provides cheap rollback per iteration via `git revert` or `git reset` without needing per-run directories.
+
 ### 6. ROUTE
 
 Based on review recommendation:
 
 **`continue`**:
-- Add any `gaps_discovered` or `edge_cases_discovered` from review to state file
+- Add any `gaps_discovered` from review to the current work unit's `notes` in progress
 - Go to step 2
 
 Note: This naturally handles "conditional pass" - issues are tracked and prevent archiving until resolved.

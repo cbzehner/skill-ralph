@@ -18,11 +18,12 @@ Ralph is a nested loop system:
 │  │ 2. Determine next action from plan state        │   │
 │  │ 3. Spawn inner loop (Task subagent)             │   │
 │  │ 4. Receive summary when inner loop exits        │   │
-│  │ 5. Run /magi review                             │   │
+│  │ 5. Review (test-gated fast path or /magi)       │   │
 │  │ 6. Update plan file with findings               │   │
-│  │ 7. If needs human input → AskUserQuestion       │   │
-│  │ 8. If complete + no gaps → archive plan         │   │
-│  │ 9. Else → goto step 2                           │   │
+│  │ 7. Auto-commit iteration                        │   │
+│  │ 8. If needs human input → AskUserQuestion       │   │
+│  │ 9. If complete + no gaps → archive plan         │   │
+│  │ 10. Else → goto step 2                          │   │
 │  └─────────────────────────────────────────────────┘   │
 │                          │                              │
 │                          ▼                              │
@@ -47,9 +48,8 @@ Ralph is a nested loop system:
 ## Completion Criteria
 
 The outer loop archives the plan when:
-1. Magi assesses the plan as "fully realized"
-2. AND no gaps remain in the frontmatter
-3. AND no edge cases remain in the frontmatter
+1. Review assesses the plan as "fully realized" (via test-gated fast path or magi)
+2. AND no unresolved notes remain in progress entries
 
 ## Inner Loop Scope
 
@@ -72,17 +72,19 @@ YAML frontmatter for machine-readable state, markdown body for human-readable pl
 ```markdown
 ---
 status: in_progress  # pending | in_progress | complete | archived
-gaps:
-  - "Need to handle edge case X"
-  - "API error handling not defined"
-edge_cases:
-  - "What happens when Y is empty?"
 progress:
   - section: "Section 1"
     status: complete
+    notes:
+      - "gap: API error handling not defined"
+      - "edge_case: what happens when Y is empty?"
   - section: "Section 2"
     status: in_progress
+    notes: []
 last_review: 2025-01-28T10:00:00Z
+iterations: 3
+no_progress_count: 0
+started_at: 2025-01-28T09:00:00Z
 ---
 
 # Plan Title
@@ -94,22 +96,20 @@ last_review: 2025-01-28T10:00:00Z
 ...
 ```
 
-## Magi Review
+## Review
 
-After each inner loop, the outer loop invokes `/magi` to evaluate:
+After each inner loop, the outer loop reviews via one of two paths:
 
-1. **Implementation correctness** - Does the code work? Tests pass?
-2. **Plan alignment** - Did the inner loop do what was intended?
-3. **Gap discovery** - What new gaps, edge cases, or TODOs emerged?
-4. **Completeness assessment** - Is the overall plan now fully realized?
+**Test-gated fast path**: When the work unit defines tests, the inner loop reports `completed` + `tests_status: passed`, AND the outer loop re-runs those tests and they pass — auto-approve without magi. This cuts the most expensive step from iterations where testing is sufficient gating.
 
-Magi returns:
-- Pass/fail on the chunk
-- List of newly discovered gaps/edge cases
-- Assessment of remaining work
-- Recommendation: `continue` | `needs_human_input` | `archive`
+**Full review (magi or self-review)**: When tests aren't defined, didn't pass, or inner loop returned partial/blocked — invoke `/magi` to evaluate correctness, alignment, gap discovery, and completeness.
 
-If magi is unavailable, the outer loop performs the same evaluation itself (less ideal but functional).
+Both paths produce the same output:
+- verdict: pass | fail | needs_work
+- gaps_discovered: [list]
+- recommendation: `continue` | `needs_human_input` | `archive`
+
+If magi is unavailable, the outer loop performs the evaluation itself using the self-review criteria in SKILL.md.
 
 ## Human Input Handling
 
@@ -126,7 +126,7 @@ When magi flags something requiring human decision:
 
 1. LOAD
    - Read plan file
-   - Parse YAML frontmatter (status, gaps, edge_cases, progress)
+   - Parse YAML frontmatter (status, progress)
    - Parse markdown body for sections
 
 2. ASSESS
@@ -142,20 +142,19 @@ When magi flags something requiring human decision:
    - Await return
 
 4. REVIEW
-   - /magi "Review this work: [inner loop summary]
-           Against plan: [current section]
-           Check: correctness, alignment, gaps, completeness"
-   - Parse magi verdict
+   - If tests defined + inner loop completed + outer re-runs tests pass
+     → fast path: auto-approve
+   - Else → /magi or self-review
 
 5. UPDATE PLAN
-   - Add any new gaps/edge_cases to frontmatter
-   - Update section progress
+   - Update progress entry (status, notes with gaps/edge cases)
    - Set last_review timestamp
    - Write plan file
+   - Auto-commit: git add -A && git commit
 
 6. ROUTE
-   - If magi says "needs_human_input" → AskUserQuestion
-   - If magi says "archive" AND no gaps → move to archived/
+   - If "needs_human_input" → AskUserQuestion
+   - If "archive" AND no unresolved notes → move to archived/
    - Else → goto step 2
 ```
 
@@ -167,8 +166,10 @@ All state lives in the plan file itself (YAML frontmatter). No separate state fi
 - Version control of the plan alongside the code
 - Multiple sessions working on different plans
 
+Each iteration auto-commits (`ralph: iteration N - [work unit]`), providing cheap per-iteration rollback via `git revert` without needing per-run directories or separate state files.
+
 ## Inner Loop Subagent
 
-The inner loop is a Task subagent with limited tool access (Read, Write, Edit, Bash, Glob, Grep). Inner loops **cannot spawn their own subagents** - if work requires parallel execution, they must return to the outer loop.
+The inner loop is a Task subagent with limited tool access (Read, Write, Edit, Bash, Glob, Grep). Inner loops **cannot spawn their own subagents** and **do not commit** — the outer loop handles both coordination and commits at iteration boundaries.
 
 See `inner-prompt.md` for the prompt template with substitution variables.

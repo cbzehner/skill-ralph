@@ -42,20 +42,18 @@ or approaching limits (max 20 turns), then summarize and exit.
 2. Run tests as you go to verify your work
 3. Use any tools you need (Read, Write, Edit, Bash, Glob, Grep)
 4. **Do NOT spawn subagents** - if work requires parallel execution, return to outer loop
-5. If blocked (need decision, unclear requirement, external dependency), stop and report
-6. After max 20 turns or if context feels heavy, find a stopping point
-7. Return a structured summary in the format below
-8. If work unit is complete, emit: `<promise>UNIT_COMPLETE</promise>`
+5. **Do NOT commit** - the outer loop handles commits at iteration boundaries
+6. If blocked (need decision, unclear requirement, external dependency), stop and report
+7. After max 20 turns or if context feels heavy, find a stopping point
+8. Return a structured summary in the format below
 
 ## Exit Criteria
 
 Stop and return your summary when ANY of these apply:
-- Work unit complete → emit `<promise>UNIT_COMPLETE</promise>` AND set `status: completed` in summary
+- Work unit complete → set `status: completed` in summary
 - Blocked → set `status: blocked` in summary
 - Turn limit → max 20 turns reached, set `status: partial` in summary
 - Context pressure → losing track of earlier work, set `status: partial` in summary
-
-**Note:** The `<promise>UNIT_COMPLETE</promise>` tag signals intent to complete; the YAML `status` field is canonical for routing.
 
 ## Summary Format
 
@@ -69,9 +67,7 @@ work_done:
 blockers:
   - "Description of any blockers (empty if none)"
 gaps_discovered:
-  - "New gaps found during implementation"
-edge_cases_discovered:
-  - "Edge cases that need handling"
+  - "New gaps or edge cases found during implementation"
 files_changed:
   - path/to/file.ext
   - another/file.ext
