@@ -3,7 +3,8 @@ name: ralph
 description: Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification. Use this whenever the user has a plan file, multi-section task, or work that should be executed systematically with reviews between chunks.
 argument-hint: "[state-file]"
 effort: high
-allowed-tools: Task, Read, Write, Edit, Glob, Grep, Skill, AskUserQuestion, Bash
+license: MIT
+allowed-tools: Task Read Write Edit Glob Grep Skill AskUserQuestion Bash
 ---
 
 # Ralph: Iterative Implementation Loop
