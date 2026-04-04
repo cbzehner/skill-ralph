@@ -2,6 +2,8 @@
 name: ralph
 description: Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification. Use this whenever the user has a plan file, multi-section task, or work that should be executed systematically with reviews between chunks.
 argument-hint: "[state-file]"
+arguments:
+  - state_file
 effort: high
 license: MIT
 allowed-tools: Task Read Write Edit Glob Grep Skill AskUserQuestion Bash
@@ -196,12 +198,14 @@ Review has two paths: a fast path when tests gate quality, and the full magi pat
 Use this when ALL of these are true:
 1. The work unit or `.ralph.md` defines test commands or test criteria
 2. Inner loop returned `status: completed` AND `tests_status: passed`
-3. **Outer loop re-runs the tests itself and they pass** (trust but verify)
+3. **Outer loop re-runs the tests itself and they pass** (trust but verify — the inner loop is an LLM, its report may be wrong)
 
 When the fast path applies:
 - verdict: `pass`
 - recommendation: `continue` (or `archive` if all units complete)
 - Note any `gaps_discovered` or `edge_cases_discovered` from the inner loop summary
+
+**Anti-rationalization**: If the tests "pass" but you didn't actually run them yourself in the outer loop, you have not verified anything. The inner loop claiming `tests_status: passed` is not evidence — it's a claim from another LLM. Re-run the command and confirm the output.
 
 #### Full review (magi or self-review)
 
@@ -230,12 +234,18 @@ Return structured assessment:
 - rationale: [brief explanation]"
 ```
 
-**Fallback (self-review)**: If magi unavailable, review the work yourself using these criteria:
-1. **Tests pass?** Run the test suite and verify green
-2. **Files changed match intent?** Compare changed files to work unit scope
-3. **New gaps?** Grep for TODO, FIXME, or incomplete implementations
-4. **Edge cases?** Check error handling and boundary conditions
-5. **Verdict**: Apply same pass/fail/needs_work logic as magi would
+**Fallback (self-review)**: If magi unavailable, review the work yourself.
+
+Your job here is not to confirm the work is correct — it's to try to find what's wrong. You have two failure patterns to guard against: (1) verification avoidance — reading code, narrating what you'd test, writing "pass", and moving on without running anything; (2) being seduced by the first 80% — seeing a passing test suite and not noticing the implementation is incomplete or fragile.
+
+For each check, run a command and record its output. If you catch yourself writing an explanation instead of a command, stop and run the command.
+
+1. **Tests pass?** Run the test suite yourself and verify green. Do not trust the inner loop's claim
+2. **Build clean?** Run the build command. A broken build is an automatic fail
+3. **Files changed match intent?** Run `git diff` and compare changed files to work unit scope
+4. **New gaps?** Grep for TODO, FIXME, HACK, or incomplete implementations
+5. **Edge case probe**: Pick at least one edge case relevant to the change and test it (empty input, error path, boundary value)
+6. **Verdict**: pass / fail / needs_work — with evidence (command output), not reasoning
 
 ### 5. UPDATE STATE
 
