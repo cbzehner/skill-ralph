@@ -9,57 +9,34 @@ license: MIT
 allowed-tools: Task Read Write Edit Glob Grep Skill AskUserQuestion Bash
 ---
 
-# Ralph: Iterative Implementation Loop
-
-Execute work through iterative cycles with review checkpoints between chunks.
+# Ralph
 
 ## Invocation
 
-```
-/ralph [state-file]
-```
-
-Examples:
-- `/ralph plans/my-feature.md` - Execute a plan file
-- `/ralph` - Auto-detect state file per project guidance
+- `/ralph plans/my-feature.md` — execute a plan file
+- `/ralph` — auto-detect state file per project guidance
 
 ## When to Use
 
-- Multi-step implementation tasks (3+ work units)
-- Plans with clear acceptance criteria or sections
-- Tasks benefiting from review checkpoints between chunks
-- Work that may span multiple context windows
+Multi-step implementation tasks with 3+ work units, clear acceptance criteria, or work spanning multiple context windows.
 
 ## When NOT to Use
 
-- **Simple single-step tasks**: One function, one bug fix—just do it directly
-- **Exploration/research tasks**: Use Task with `subagent_type: Explore` instead
-- **Tasks needing parallel execution**: Inner loops run sequentially; parallel coordination adds context burden without speedup
+- **Exploration/research**: Use `subagent_type: Explore` instead
+- **Parallel execution needed**: Inner loops run sequentially — no speedup from parallel coordination
 - **Unclear requirements**: Clarify first, then plan, then ralph
-- **Tasks estimated >60 minutes**: Split into separate plans; long sessions hit context exhaustion
+- **Tasks >60 minutes**: Split into separate plans; long sessions hit context exhaustion
 
 ## Host Adaptation
 
-Ralph's inner loop uses Claude Code primitives (Task subagents, Skill tool,
-AskUserQuestion). On hosts without these:
-
-- **No Task tool**: Run work units sequentially in the current session instead
-  of spawning subagents. Skip `max_turns` enforcement — use the guardrail
-  timers instead.
-- **No Skill tool**: Use self-review (Step 4 fallback) instead of `/magi`.
-  The self-review criteria already exist in the skill.
-- **No AskUserQuestion**: Make conservative assumptions and document them.
-  When a decision truly requires human input, state what you'd recommend and
-  why, then pause and wait for the user to respond.
-- **`${CLAUDE_SKILL_DIR}` unavailable**: Resolve file references relative to
-  the skill's actual directory path.
-
-The outer loop (LOAD → ASSESS → WORK → REVIEW → UPDATE → ROUTE) is the same
-regardless of host. Only the execution primitives change.
+<!-- WHY: Without this, model errors out on hosts missing Claude Code primitives -->
+If the host lacks specific tools, adapt:
+- **No Task tool**: Run work units sequentially in current session; use guardrail timers instead of `max_turns`
+- **No Skill tool**: Use self-review fallback (Step 4) instead of `/magi`
+- **No AskUserQuestion**: State your recommendation and pause for user response
+- **`${CLAUDE_SKILL_DIR}` unavailable**: Resolve paths relative to skill's actual directory
 
 ## Guardrails
-
-Ralph enforces limits to prevent context exhaustion:
 
 | Threshold | Action |
 |-----------|--------|
@@ -69,148 +46,74 @@ Ralph enforces limits to prevent context exhaustion:
 | 3 consecutive no-progress iterations | Circuit breaker: escalate to user |
 | Inner loop max turns (20) | Force exit, return partial summary |
 
-Track iteration progress in state file frontmatter:
-```yaml
-iterations: 0
-no_progress_count: 0
-started_at: 2026-01-30T10:00:00Z
-```
-
-## Project Guidance
-
-Ralph adapts to project-specific conventions via a `.ralph.md` file.
+## Project Guidance (.ralph.md)
 
 ### Finding .ralph.md
 
-Search in order:
-1. **Git repository root**: `git rev-parse --show-toplevel` then check for `.ralph.md`
-2. **Walk up from current directory**: Check each parent until `.ralph.md` found or root reached
-3. **State file's directory**: If state file provided, check its directory
-
-```bash
-# Get git project root
-git rev-parse --show-toplevel 2>/dev/null
-```
+Search in order: git repo root → walk up from cwd → state file's directory.
 
 ### If No .ralph.md Found
 
-Use AskUserQuestion to offer creating one:
-
-"No `.ralph.md` found for this project. Would you like to create one?"
-- **Yes, help me create it** - Ask design questions, generate .ralph.md
-- **Use defaults** - Continue with plan-file conventions
-- **Skip for now** - Continue without guidance
-
-See `examples/` in this skill's directory for templates and the README for guidance on crafting .ralph.md files.
+Ask the user: create one (see `${CLAUDE_SKILL_DIR}/examples/` for templates), use defaults, or skip.
 
 ## The Loop
 
 ### 1. LOAD
 
-1. Find and load `.ralph.md` if present (provides project-specific guidance)
-2. Read the state file
-3. Parse state according to guidance (or use default plan format)
+1. Load `.ralph.md` if found (see Project Guidance above)
+2. Read and parse the state file (default format or per .ralph.md)
 
 **Default format** (when no .ralph.md):
 ```yaml
 ---
 status: pending  # pending | in_progress | complete | archived
-progress: []     # each entry: { section, status, notes: [] }
+progress: []     # each entry: { section, status, notes: ["gap: ...", "edge_case: ..."] }
 last_review: null
 iterations: 0
 no_progress_count: 0
-started_at: null  # Set to current timestamp on first ASSESS
+started_at: null  # Set on first ASSESS
 ---
-
-# Title
-
-## Section 1
-...
-```
-
-Progress entries track gaps and edge cases per work unit:
-```yaml
-progress:
-  - section: "Section 1"
-    status: complete
-    notes:
-      - "gap: API error handling not defined"
-      - "edge_case: empty input returns null"
-  - section: "Section 2"
-    status: in_progress
-    notes: []
 ```
 
 If file lacks frontmatter, add defaults.
 
 ### 2. ASSESS
 
-- Check completion status → if complete/archived, inform user and exit
-- Update status to `in_progress` if pending
-- **Initialize guardrails** (first iteration only):
-  - If `started_at` is null, set to current timestamp (run `date -Iseconds`)
-  - If `iterations` is missing, set to 0
-- **Check guardrails**:
-  - Compare current time to `started_at` → warn at 30min, recommend break at 45min, force checkpoint at 60min
-  - Check `no_progress_count` → escalate to user if >= 3
-- Identify work units per guidance:
-  - **Default**: `## ` headings not in progress array
-  - **Per guidance**: acceptance criteria, issues, custom sections
-- Group related units if guidance suggests logical groupings
-- If all units complete → proceed to final review
+- If complete/archived → inform user and exit
+- If pending → set `in_progress`, initialize `started_at` (`date -Iseconds`) and `iterations` if missing
+- **Check guardrails**: time vs `started_at` (warn 30min, break 45min, force 60min); `no_progress_count` >= 3 → escalate
+- **Identify work units**: default = `## ` headings not in progress array; or per .ralph.md guidance
+- If all units complete → final review
 
-**Work unit prioritization:**
-1. Resume any `status: partial` unit from previous iteration
-2. Pick first incomplete unit in document order
-3. If a unit depends on another, complete the dependency first
+**Prioritization**: Resume `partial` units → first incomplete in doc order → resolve dependencies first.
 
-**Atomic sizing:** Each work unit should fit in one context window. If a unit seems too large (multiple files, complex logic), split it before starting.
+**Sizing**: Each unit must fit one context window. Split large units before starting.
 
 ### 3. SPAWN INNER LOOP
 
-Use the Task tool to spawn a subagent:
+Spawn a Task subagent (`general-purpose`, `max_turns: 20`) using the template in `${CLAUDE_SKILL_DIR}/inner-prompt.md`. Include project guidance if present.
 
-```
-Task(
-  subagent_type: "general-purpose",
-  description: "Implement: [work unit summary]",
-  max_turns: 20,
-  prompt: [see ${CLAUDE_SKILL_DIR}/inner-prompt.md, include project guidance if present]
-)
-```
-
-Inner loop works until:
-- Work unit complete (sets `status: completed` in return summary)
-- Blocked (needs decision, unclear requirement)
-- Max turns reached (hard limit: 20)
-- Context pressure (losing track of earlier work)
-
-**Subagent limitation:** Inner loops cannot spawn their own subagents. If work requires parallel execution, return to outer loop and let it coordinate.
-
-Returns structured summary (see inner-prompt.md for format).
+<!-- WHY: Inner loops spawning sub-subagents causes coordination chaos -->
+**Constraint**: Inner loops cannot spawn their own subagents — return to outer loop for coordination.
 
 ### 4. REVIEW
 
-Review has two paths: a fast path when tests gate quality, and the full magi path otherwise.
+Two paths: fast (test-gated) or full (magi/self-review).
 
 #### Test-gated fast path
 
-Use this when ALL of these are true:
-1. The work unit or `.ralph.md` defines test commands or test criteria
-2. Inner loop returned `status: completed` AND `tests_status: passed`
-3. **Outer loop re-runs the tests itself and they pass** (trust but verify — the inner loop is an LLM, its report may be wrong)
+ALL must be true: (1) tests defined, (2) inner loop returned `completed` + `tests_status: passed`, (3) **outer loop re-runs tests and they pass**.
 
-When the fast path applies:
-- verdict: `pass`
-- recommendation: `continue` (or `archive` if all units complete)
-- Note any `gaps_discovered` or `edge_cases_discovered` from the inner loop summary
+→ verdict: `pass`, recommendation: `continue` (or `archive` if all done). Note any `gaps_discovered`.
 
-**Anti-rationalization**: If the tests "pass" but you didn't actually run them yourself in the outer loop, you have not verified anything. The inner loop claiming `tests_status: passed` is not evidence — it's a claim from another LLM. Re-run the command and confirm the output.
+<!-- WHY: LLMs claim tests pass without running them — this is the #1 observed failure mode -->
+**You must run the tests yourself.** The inner loop claiming `tests_status: passed` is a claim from another LLM, not evidence.
 
 #### Full review (magi or self-review)
 
-Use when the fast path does NOT apply: tests not defined, tests failed, inner loop returned `partial` or `blocked`, or `tests_status: not_run`.
+Use when fast path doesn't apply (no tests, tests failed, `partial`, `blocked`).
 
+<!-- WHY: This prompt is dispatched to magi sub-agent — must be self-contained -->
 ```
 /magi "Review this implementation work:
 
@@ -221,93 +124,39 @@ Use when the fast path does NOT apply: tests not defined, tests failed, inner lo
 [what was being implemented]
 
 ## Evaluate
-1. Implementation correctness - Does it work? Tests pass?
-2. Alignment - Did the work match the intended unit?
-3. Gap discovery - Any new gaps, edge cases, or TODOs?
-4. Completeness - Is the overall work fully realized?
+1. Correctness - Does it work? Tests pass?
+2. Alignment - Did work match the intended unit?
+3. Gap discovery - New gaps, edge cases, TODOs?
+4. Completeness - Is the work fully realized?
 
-Return structured assessment:
-- verdict: pass | fail | needs_work
-- gaps_discovered: [list]
-- remaining_work: [description]
-- recommendation: continue | needs_human_input | archive
-- rationale: [brief explanation]"
+Return: verdict (pass|fail|needs_work), gaps_discovered, recommendation (continue|needs_human_input|archive), rationale."
 ```
 
-**Fallback (self-review)**: If magi unavailable, review the work yourself.
+<!-- WHY: Without explicit anti-verification-avoidance, model narrates checks instead of running them -->
+**Self-review fallback** (if magi unavailable): Your job is to find what's wrong, not confirm correctness. Guard against passing tests hiding incomplete implementations — verify scope, not just green. Run commands for each check — if you're writing an explanation instead of running a command, stop.
 
-Your job here is not to confirm the work is correct — it's to try to find what's wrong. You have two failure patterns to guard against: (1) verification avoidance — reading code, narrating what you'd test, writing "pass", and moving on without running anything; (2) being seduced by the first 80% — seeing a passing test suite and not noticing the implementation is incomplete or fragile.
-
-For each check, run a command and record its output. If you catch yourself writing an explanation instead of a command, stop and run the command.
-
-1. **Tests pass?** Run the test suite yourself and verify green. Do not trust the inner loop's claim
-2. **Build clean?** Run the build command. A broken build is an automatic fail
-3. **Files changed match intent?** Run `git diff` and compare changed files to work unit scope
-4. **New gaps?** Grep for TODO, FIXME, HACK, or incomplete implementations
-5. **Edge case probe**: Pick at least one edge case relevant to the change and test it (empty input, error path, boundary value)
-6. **Verdict**: pass / fail / needs_work — with evidence (command output), not reasoning
+1. Run tests yourself — don't trust inner loop's claim
+2. Run build — broken build = automatic fail
+3. `git diff` — do changed files match work unit scope?
+4. Grep for TODO/FIXME/HACK
+5. Test one edge case (empty input, error path, boundary)
+6. Verdict with evidence (command output), not reasoning
 
 ### 5. UPDATE STATE
 
-Update the state file per guidance:
-- **Default**: Update `progress` array — set section status, append gaps/edge cases to `notes`
-- **Per guidance**: Check off criteria, append to sections, etc.
+Update `progress` array (or per .ralph.md guidance). Set `last_review` timestamp.
 
-**Update guardrail tracking:**
-- Increment `iterations`
-- If inner loop returned `status: partial` AND `files_changed` is empty:
-  - Increment `no_progress_count`
-- Else:
-  - Reset `no_progress_count` to 0
+**Guardrail counters**: Increment `iterations`. If inner loop returned `partial` with empty `files_changed` → increment `no_progress_count`; else reset to 0.
 
-Set review timestamp (`last_review`).
-
-**Auto-commit at iteration boundary:**
-After updating the state file, commit all changes from this iteration:
-```bash
-git add -A && git commit -m "ralph: iteration [N] - [work unit name]"
-```
-This provides cheap rollback per iteration via `git revert` or `git reset` without needing per-run directories.
+**Auto-commit**: `git add -A && git commit -m "ralph: iteration [N] - [work unit name]"` — enables per-iteration rollback.
 
 ### 6. ROUTE
 
-Based on review recommendation:
+**`continue`**: Add `gaps_discovered` to work unit's `notes` → go to step 2.
 
-**`continue`**:
-- Add any `gaps_discovered` from review to the current work unit's `notes` in progress
-- Go to step 2
+**`needs_human_input`**: Surface decision via AskUserQuestion (what was attempted, what needs clarification, options) → after response, step 2.
 
-Note: This naturally handles "conditional pass" - issues are tracked and prevent archiving until resolved.
-
-**`needs_human_input`**:
-- Use AskUserQuestion to surface the decision
-- Present: what was attempted, what needs clarification, options
-- After response → step 2
-
-**`archive`** (or equivalent completion):
-- Verify no remaining gaps/issues per guidance
-- Mark status as `archived` in frontmatter
-- Move file to `plans/archived/` (or per guidance)
-- Stage only relevant files: state file + files from `files_changed` arrays
-- Use AskUserQuestion to confirm commit: "Ready to commit completion of [plan title]. Proceed?"
-- If confirmed: `git commit -m "Complete: [plan title]"`
-- If issues remain → inform user, continue to step 2
-
-## Completion Criteria
-
-The loop completes when:
-1. Review assesses work as "fully realized"
-2. No remaining gaps or blockers
-3. Per-guidance completion signals sent (if applicable)
-
-## Error Handling
-
-| Scenario | Action |
-|----------|--------|
-| Magi unavailable | Self-review using fallback criteria (see step 4) |
-| Inner loop blocked | Surface via AskUserQuestion with context |
-| State file parse error | Show error, ask user to fix format |
-| No .ralph.md | Offer to create or use defaults (see Project Guidance) |
+**`archive`**: Verify no remaining gaps → send per-guidance completion signals if applicable → mark `archived` → move to `plans/archived/` (or per guidance) → confirm commit with user → `git commit -m "Complete: [plan title]"`. If issues remain → step 2.
 
 ## Manual Control
 
@@ -315,7 +164,4 @@ Interrupt anytime. State file preserves progress. Resume with `/ralph [state-fil
 
 ## Reference
 
-- [inner-prompt.md](${CLAUDE_SKILL_DIR}/inner-prompt.md) - Inner loop subagent template
-- [examples/](${CLAUDE_SKILL_DIR}/examples/) - Example .ralph.md files for different project types
-- [examples/README.md](${CLAUDE_SKILL_DIR}/examples/README.md) - Guide for crafting .ralph.md files
-- [docs/ARCHITECTURE.md](${CLAUDE_SKILL_DIR}/docs/ARCHITECTURE.md) - Full architecture documentation
+See `${CLAUDE_SKILL_DIR}/` for: `inner-prompt.md` (subagent template), `examples/` (.ralph.md templates + README), `docs/ARCHITECTURE.md`.
