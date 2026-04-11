@@ -4,7 +4,7 @@ Use this template when spawning the inner loop Task subagent.
 
 ## Template
 
-```markdown
+````markdown
 You are implementing part of a larger task. Work until complete, blocked,
 or approaching limits (max 20 turns), then summarize and exit.
 
@@ -75,10 +75,11 @@ tests_status: passed | failed | not_run
 next_steps:
   - "What should be done next"
   - "Another follow-up item"
+engine: claude
 ```
 
 Be specific in your summary - the outer loop will use this for review.
-```
+````
 
 ## Substitution Variables
 

@@ -16,7 +16,7 @@ Ralph is a nested loop system:
 │  ┌─────────────────────────────────────────────────┐   │
 │  │ 1. Read plan file (YAML frontmatter + markdown) │   │
 │  │ 2. Determine next action from plan state        │   │
-│  │ 3. Spawn inner loop (Task subagent)             │   │
+│  │ 3. Detect engine + spawn inner loop             │   │
 │  │ 4. Receive summary when inner loop exits        │   │
 │  │ 5. Review (test-gated fast path or /magi)       │   │
 │  │ 6. Update plan file with findings               │   │
@@ -26,16 +26,21 @@ Ralph is a nested loop system:
 │  │ 10. Else → goto step 2                          │   │
 │  └─────────────────────────────────────────────────┘   │
 │                          │                              │
-│                          ▼                              │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │              INNER LOOP (subagent)              │   │
-│  │                                                 │   │
-│  │  • Receives: plan context + current focus       │   │
-│  │  • Works until: blocked OR max 20 turns OR      │   │
-│  │    context pressure                             │   │
-│  │  • Returns: summary of work done, blockers,     │   │
-│  │    any discovered gaps/edge cases               │   │
-│  └─────────────────────────────────────────────────┘   │
+│                    detect engine                         │
+│                     ┌────┴────┐                         │
+│                     ▼         ▼                         │
+│  ┌──────────────────────┐ ┌──────────────────────┐     │
+│  │  INNER LOOP (Codex)  │ │ INNER LOOP (Claude)  │     │
+│  │     [default]        │ │    [fallback]         │     │
+│  │                      │ │                       │     │
+│  │ • Builds focused spec│ │ • Receives: plan      │     │
+│  │ • Runs codex-adapter │ │   context + focus     │     │
+│  │ • Verifies: git diff,│ │ • Implements directly │     │
+│  │   build, tests       │ │ • Works until blocked │     │
+│  │ • Returns: summary   │ │   OR max 20 turns     │     │
+│  │   with engine: codex │ │ • Returns: summary    │     │
+│  │                      │ │   with engine: claude  │     │
+│  └──────────────────────┘ └──────────────────────┘     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -44,6 +49,21 @@ Ralph is a nested loop system:
 **The Problem**: Long implementation tasks lose context. After 40+ tool calls, Claude starts forgetting earlier decisions, re-reading files it already read, and generally thrashing.
 
 **The Solution**: Break work into chunks. Each inner loop works on one section with fresh context. The outer loop maintains continuity through the plan file.
+
+**Why Codex First?**: Codex is faster for scoped implementation tasks. Ralph already sizes work units to fit one context window with clear goals — a natural match. Using Codex for implementation while Claude handles orchestration and review gives the best of both engines. When Codex isn't available, the original Claude inner loop remains as a fallback.
+
+## Engine Detection
+
+Ralph detects Codex availability once per session and caches the result:
+
+1. Locate `codex-adapter.sh` (from codex-implement skill directory)
+2. Check that at least one transport is available:
+   - Companion plugin file exists (`codex-companion.mjs`), OR
+   - `codex` binary is on PATH
+
+If neither transport is found, ralph logs a warning and uses the Claude inner loop for all iterations. This is a filesystem check, not a live Codex invocation.
+
+**No mid-run fallback**: If Codex runs but produces bad output, the subagent reports it and the outer loop handles retry. Claude fallback only activates for transport-level unavailability detected at session start.
 
 ## Completion Criteria
 
@@ -135,10 +155,16 @@ When magi flags something requiring human decision:
    - Identify next section to work on (first non-complete)
 
 3. SPAWN INNER LOOP
-   - Task subagent with:
-     - Full plan context
-     - Current focus section
-     - Instructions: "work until blocked or context heavy"
+   - Detect engine (once per session, cached):
+     - codex-adapter.sh exists + transport available → Codex
+     - Otherwise → Claude fallback
+   - Codex path (default):
+     - Task subagent delegates to Codex via codex-adapter.sh
+     - Subagent verifies: git diff, build, tests
+     - Returns summary with engine: codex
+   - Claude path (fallback):
+     - Task subagent implements directly
+     - Returns summary with engine: claude
    - Await return
 
 4. REVIEW
@@ -170,6 +196,10 @@ Each iteration auto-commits (`ralph: iteration N - [work unit]`), providing chea
 
 ## Inner Loop Subagent
 
-The inner loop is a Task subagent with limited tool access (Read, Write, Edit, Bash, Glob, Grep). Inner loops **cannot spawn their own subagents** and **do not commit** — the outer loop handles both coordination and commits at iteration boundaries.
+The inner loop is a Task subagent with limited tool access. Inner loops **cannot spawn their own subagents** and **do not commit** — the outer loop handles both coordination and commits at iteration boundaries.
 
-See `inner-prompt.md` for the prompt template with substitution variables.
+**Codex engine** (default): The subagent delegates to Codex via `codex-adapter.sh` and verifies the results (git diff, build, tests). See `inner-prompt-codex.md` for the prompt template.
+
+**Claude engine** (fallback): The subagent implements directly using Read, Write, Edit, Bash, Glob, Grep. See `inner-prompt.md` for the prompt template.
+
+Both engines return the same YAML summary format. The `engine` field indicates which ran.

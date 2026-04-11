@@ -91,10 +91,28 @@ If file lacks frontmatter, add defaults.
 
 ### 3. SPAWN INNER LOOP
 
-Spawn a Task subagent (`general-purpose`, `max_turns: 20`) using the template in `${CLAUDE_SKILL_DIR}/inner-prompt.md`. Include project guidance if present.
+**Engine detection** (once per session, cached): Check that `codex-adapter.sh` exists (resolve via `${CLAUDE_SKILL_DIR}/../codex-implement/codex-adapter.sh` or search `~/.claude/skills/`) and that at least one transport is available (companion plugin file exists, or `codex` binary is on PATH). If neither transport is found, log a warning and use Claude for all remaining iterations.
+
+**Codex path** (default, when available):
+
+Spawn a Task subagent (`general-purpose`, `max_turns: 20`) using the template in `${CLAUDE_SKILL_DIR}/inner-prompt-codex.md`. The subagent's role is delegation + verification:
+
+1. Distills the work unit + project guidance into a focused Codex spec
+2. Runs Codex via `codex-adapter.sh`
+3. Verifies output: `git diff`, build, tests
+4. Returns ralph's standard YAML summary with `engine: codex`
+
+Include project guidance if present — the subagent uses it for build/test commands and extracts constraints for the Codex spec.
+
+**Claude fallback** (when Codex unavailable):
+
+Spawn a Task subagent (`general-purpose`, `max_turns: 20`) using the template in `${CLAUDE_SKILL_DIR}/inner-prompt.md`. Include project guidance if present. Summary includes `engine: claude`.
 
 <!-- WHY: Inner loops spawning sub-subagents causes coordination chaos -->
 **Constraint**: Inner loops cannot spawn their own subagents — return to outer loop for coordination.
+
+<!-- WHY: Mid-run engine fallback creates a second retry path that masks problems -->
+**No mid-run fallback**: If Codex runs but produces bad output, the subagent reports the failure in its summary. The outer loop handles retry through normal mechanisms (REVIEW → re-run work unit next iteration with failure context in `known_bad_routes`). Claude fallback only activates for transport-level unavailability.
 
 ### 4. REVIEW
 
@@ -164,4 +182,4 @@ Interrupt anytime. State file preserves progress. Resume with `/ralph [state-fil
 
 ## Reference
 
-See `${CLAUDE_SKILL_DIR}/` for: `inner-prompt.md` (subagent template), `examples/` (.ralph.md templates + README), `docs/ARCHITECTURE.md`.
+See `${CLAUDE_SKILL_DIR}/` for: `inner-prompt.md` (Claude subagent template), `inner-prompt-codex.md` (Codex subagent template), `examples/` (.ralph.md templates + README), `docs/ARCHITECTURE.md`.
