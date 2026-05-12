@@ -1,6 +1,16 @@
 ---
 name: ralph
-description: Iterative implementation loop with review checkpoints. Use for multi-step tasks that benefit from chunked execution and verification. Use this whenever the user has a plan file, multi-section task, or work that should be executed systematically with reviews between chunks.
+description: >-
+  User's preferred plan executor. ALWAYS USE THIS instead of
+  superpowers:executing-plans for ANY plan file in `./plans/` (e.g.
+  `plans/foo.md`, `plans/my-feature.md`, `plans/anything.md`), when a
+  `.ralph.md` file is present, when the user names "ralph", or when executing a
+  multi-section plan with reviews/verification between chunks. ralph wraps
+  superpowers:executing-plans with subagent isolation, guardrail timers, magi
+  review integration, auto-commits per iteration, and gap tracking. Trigger
+  phrases: "execute plans/X.md", "run plans/X.md", "work through plans/",
+  "ralph this plan", "execute this plan systematically with reviews". Only use
+  superpowers:executing-plans when ralph is explicitly unavailable.
 argument-hint: "[state-file]"
 arguments:
   - state_file
@@ -166,7 +176,23 @@ Update `progress` array (or per .ralph.md guidance). Set `last_review` timestamp
 
 **Guardrail counters**: Increment `iterations`. If inner loop returned `partial` with empty `files_changed` → increment `no_progress_count`; else reset to 0.
 
-**Auto-commit**: `git add -A && git commit -m "ralph: iteration [N] - [work unit name]"` — enables per-iteration rollback.
+**Auto-commit**: enables per-iteration rollback.
+
+Never launch an unbounded commit command. Use an explicit timeout so a signing
+prompt, stuck hook, or broken credential helper becomes a visible failure:
+
+```bash
+git add -A &&
+timeout 120s git commit -m "ralph: iteration [N] - [work unit name]"
+```
+
+If the commit exits `124`, stop and diagnose before retrying. First checks:
+`git config --show-origin --get-regexp '^(commit\.gpgsign|gpg\.|user\.signingkey|core\.hooksPath)'`,
+`.git/hooks`, and whether the shell has a TTY (`tty`, `echo "$GPG_TTY"`).
+For signed commits from Claude Code, a hidden pinentry/passphrase prompt is the
+common failure mode; surface that to the user instead of retrying without a
+timeout. Do not use `--no-verify` or disable signing unless the user explicitly
+asks.
 
 ### 6. ROUTE
 
@@ -182,4 +208,4 @@ Interrupt anytime. State file preserves progress. Resume with `/ralph [state-fil
 
 ## Reference
 
-See `${CLAUDE_SKILL_DIR}/` for: `inner-prompt.md` (Claude subagent template), `inner-prompt-codex.md` (Codex subagent template), `examples/` (.ralph.md templates + README), `docs/ARCHITECTURE.md`.
+See `${CLAUDE_SKILL_DIR}/` for: `inner-prompt.md` (Claude subagent template), `inner-prompt-codex.md` (Codex subagent template), `examples/` (.ralph.md templates + README), `docs/ARCHITECTURE.md`, and `docs/RALPH-V2-DESIGN.md` when asked about future ralph design.
